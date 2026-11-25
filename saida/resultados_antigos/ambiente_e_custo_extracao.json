@@ -1,0 +1,23 @@
+{
+  "sistema": "Windows-11-10.0.26200-SP0",
+  "processador": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+  "nucleos_logicos": 16,
+  "ram_gb": 15.7,
+  "python": "3.13.14",
+  "numpy": "2.5.5",
+  "sklearn": "1.9.1",
+  "pandas": "3.1.1",
+  "mediapipe": "1.2.3",
+  "etapas_extracao": {
+    "mediapipe_ms_quadro_mediana": 10.95919986255467,
+    "mediapipe_ms_quadro_p95": 13.760200003162026,
+    "quadro_total_ms_mediana": 15.995800029486418,
+    "resolucao_processada": [
+      640,
+      1138
+    ],
+    "fps_videos_mediana": 29.968853442104123,
+    "atributos_janela60s_ms_mediana": 1.5367,
+    "atributos_janela60s_ms_p95": 1.808355
+  }
+}

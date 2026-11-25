@@ -1,0 +1,6 @@
+modelo_a,modelo_b,n_participantes,diferenca_media,estatistica_W,p_valor
+pmc,adaline,25,-0.0182,116.0000,0.2200
+pmc,perceptron,25,0.0093,161.5000,0.9785
+pmc,rbf,25,0.0222,143.0000,0.6150
+rbf,adaline,25,-0.0404,115.0000,0.2011
+rbf,perceptron,25,-0.0129,150.0000,0.7510

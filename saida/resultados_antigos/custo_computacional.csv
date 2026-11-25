@@ -1,0 +1,5 @@
+modelo,hiperparametros,n_parametros,macs_por_inferencia,memoria_pesos_float32_kb,arquivo_joblib_kb,inferencia_sklearn_ms_mediana,inferencia_sklearn_ms_p95,inferencia_numpy_ms_mediana,inferencia_numpy_ms_p95,treino_s,n_treino
+perceptron,"{""eta0"": ""0.1""}",43,14,0.16797,2.79590,0.67620,0.96058,0.00280,0.00290,0.01672,429
+adaline,"{""eta0"": ""0.0001""}",43,14,0.16797,2.80371,0.67125,0.96922,0.00280,0.00290,0.00399,429
+pmc,"{""alpha"": ""0.0001"", ""hidden_layer_sizes"": ""(32,)""}",541,480,2.11328,16.62793,0.71225,1.29775,0.00510,0.00560,0.02894,429
+rbf,"{""largura"": ""haykin"", ""n_centros"": ""4.0"", ""ridge"": ""0.001""}",98,64,0.38281,2.77832,0.59690,1.03617,0.00790,0.00860,0.05799,429

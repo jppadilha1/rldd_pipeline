@@ -15,6 +15,13 @@ Protocolo
 - Teste de Wilcoxon pareado por participante (acurácia balanceada).
 - Importância por permutação (PMC e RBF) nos folds de teste.
 
+Treinamento no estilo clássico (redes_classicas.py): Perceptron pela regra de
+Hebb, Adaline pela regra delta, PMC por backpropagation e RBF por k-means +
+regra delta, com taxa de aprendizagem eta e precisão epsilon = 1e-6. Para cada
+treinamento são registrados o número de épocas, o EQM final e a curva do EQM.
+Ao final, a configuração mais escolhida de cada rede é treinada com todas as
+janelas (tarefa binária) e seus pesos são exportados ("função aprendida").
+
 Tarefas: "binaria" (alerta x sonolento) e "tres" (alerta x baixa vigilância x
 sonolento).
 
@@ -22,6 +29,7 @@ Exemplo:
   python 03_treinar_avaliar.py --atributos saida/atributos.csv --saida saida/resultados
 """
 import argparse
+import ast
 import json
 import time
 import warnings
@@ -31,21 +39,18 @@ import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 from sklearn.base import clone
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
-from sklearn.linear_model import Perceptron, SGDClassifier
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, confusion_matrix,
                              f1_score, recall_score, roc_auc_score)
 from sklearn.model_selection import GridSearchCV, GroupKFold
-from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from comum import ATRIBUTOS, PARAM
-from rbf import RedeRBF
+from redes_classicas import AdalineClassico, PerceptronClassico, PMCClassico, RBFClassica
 
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 def pipe(clf):
@@ -54,20 +59,40 @@ def pipe(clf):
                      ("clf", clf)])
 
 
+EPSILON = 1e-6
 MODELOS = {
-    "perceptron": (pipe(Perceptron(max_iter=1000, tol=1e-3)),
-                   {"clf__eta0": [0.01, 0.1, 1.0]}),
-    "adaline": (pipe(SGDClassifier(loss="squared_error", penalty=None, learning_rate="constant",
-                                   max_iter=1000, tol=1e-4)),
-                {"clf__eta0": [1e-4, 1e-3, 1e-2]}),
-    "pmc": (pipe(MLPClassifier(activation="tanh", solver="lbfgs", max_iter=3000)),
-            {"clf__hidden_layer_sizes": [(2,), (4,), (8,), (16,), (32,)],
-             "clf__alpha": [1e-4, 1e-3, 1e-2, 1e-1, 1.0]}),
-    "rbf": (pipe(RedeRBF()),
+    "perceptron": (pipe(PerceptronClassico(max_epocas=1000)),
+                   {"clf__eta": [0.001, 0.01, 0.1]}),
+    "adaline": (pipe(AdalineClassico(epsilon=EPSILON, max_epocas=10000)),
+                {"clf__eta": [0.001, 0.01, 0.05]}),
+    "pmc": (pipe(PMCClassico(epsilon=EPSILON, max_epocas=10000)),
+            {"clf__n_ocultos": [2, 4, 8, 16, 32],
+             "clf__eta": [0.1, 0.5, 1.0]}),
+    "rbf": (pipe(RBFClassica(epsilon=EPSILON, max_epocas=10000)),
             {"clf__n_centros": [2, 4, 8, 16, 32],
              "clf__largura": ["cluster", "haykin"],
-             "clf__ridge": [1e-3, 1e-1, 10.0]}),
+             "clf__eta": [0.01, 0.1]}),
 }
+
+
+def config_final(hip, nome):
+    """Configuração mais escolhida entre os folds; empate -> maior acurácia
+    balanceada na validação interna."""
+    h = hip[hip["modelo"] == nome].copy()
+    cols = [c for c in h.columns if c not in ("fold", "modelo", "cv_interna_acc_bal")]
+    cols = [c for c in cols if h[c].notna().all()]
+    h["_chave"] = h[cols].astype(str).agg("|".join, axis=1)
+    cont = h.groupby("_chave").agg(n=("fold", "size"), cv=("cv_interna_acc_bal", "max"))
+    chave = cont.sort_values(["n", "cv"], ascending=False).index[0]
+    linha = h[h["_chave"] == chave].iloc[0]
+    out = {}
+    for c in cols:
+        v = linha[c]
+        try:
+            out[f"clf__{c}"] = ast.literal_eval(str(v))
+        except (ValueError, SyntaxError):
+            out[f"clf__{c}"] = v
+    return out
 
 
 def carregar(caminho, tarefa):
@@ -81,14 +106,7 @@ def carregar(caminho, tarefa):
 
 
 def escore(modelo, X, n_classes):
-    clf = modelo
-    if hasattr(clf, "predict_proba"):
-        try:
-            p = clf.predict_proba(X)
-            return p[:, 1] if n_classes == 2 else p
-        except AttributeError:
-            pass
-    return clf.decision_function(X)
+    return modelo.decision_function(X)
 
 
 def metricas(y, yp, s, binaria):
@@ -117,7 +135,7 @@ def rodar_tarefa(df, tarefa, sementes, saida):
     n_classes = df["y"].nunique()
     X, y, grupos = df[ATRIBUTOS], df["y"].to_numpy(), df["participante"].to_numpy()
     folds = sorted(df["fold"].unique())
-    pred_linhas, hip_linhas, tempo_linhas, imp_linhas = [], [], [], []
+    pred_linhas, hip_linhas, tempo_linhas, imp_linhas, curvas = [], [], [], [], []
 
     for fold in folds:
         te = df["fold"].to_numpy() == fold
@@ -147,8 +165,13 @@ def rodar_tarefa(df, tarefa, sementes, saida):
                 t_fit = time.perf_counter() - t0
                 yp = m.predict(X[te])
                 sc = escore(m, X[te], n_classes)
+                c = m.named_steps["clf"]
                 tempo_linhas.append(dict(fold=fold, modelo=nome, semente=sem, treino_s=t_fit,
-                                         n_treino=int(tr.sum())))
+                                         n_treino=int(tr.sum()), epocas=c.epocas_,
+                                         eqm_final=c.eqm_final_, parada=c.motivo_parada_))
+                if sem == sementes[0]:
+                    curvas += [dict(modelo=nome, fold=fold, epoca=i, valor=v)
+                               for i, v in enumerate(c.curva_)]
                 linha = base.assign(modelo=nome, semente=sem, yp=yp)
                 linha["escore"] = sc if np.ndim(sc) == 1 else np.nan
                 pred_linhas.append(linha)
@@ -162,7 +185,17 @@ def rodar_tarefa(df, tarefa, sementes, saida):
     pred = pd.concat(pred_linhas, ignore_index=True)
     pred.to_csv(saida / f"predicoes_{tarefa}.csv", index=False)
     pd.DataFrame(hip_linhas).to_csv(saida / f"hiperparametros_{tarefa}.csv", index=False)
-    pd.DataFrame(tempo_linhas).to_csv(saida / f"tempo_treino_{tarefa}.csv", index=False)
+    trein = pd.DataFrame(tempo_linhas)
+    trein.to_csv(saida / f"treinamento_{tarefa}.csv", index=False, float_format="%.6g")
+    pd.DataFrame(curvas).to_csv(saida / f"curvas_eqm_{tarefa}.csv", index=False, float_format="%.6g")
+    tab = (trein.groupby(["modelo", "fold"])
+           .agg(epocas_media=("epocas", "mean"), epocas_dp=("epocas", "std"),
+                eqm_medio=("eqm_final", "mean"), eqm_dp=("eqm_final", "std"),
+                treinos_no_limite=("parada", lambda v: int((v == "max_epocas").sum())),
+                treino_s_medio=("treino_s", "mean")).reset_index())
+    tab.to_csv(saida / f"resumo_treinamento_{tarefa}.csv", index=False, float_format="%.6g")
+    if binaria:
+        exportar_modelos_finais(df, pd.DataFrame(hip_linhas), saida)
 
     # Métricas por (modelo, semente, fold) -> média nas sementes -> média/dp nos folds
     regs = []
@@ -214,6 +247,41 @@ def rodar_tarefa(df, tarefa, sementes, saida):
     cols = [c for c in resumo.columns if c.split("_")[0] in ("acuracia", "f1", "auc", "sensibilidade")]
     print(resumo[cols].round(3).to_string())
     return resumo
+
+
+def exportar_modelos_finais(df, hip, saida):
+    """Treina PMC e RBF (e Adaline) com todas as janelas, na configuração mais
+    escolhida, e exporta pesos, centros e curva de EQM."""
+    X, y = df[ATRIBUTOS], df["y"].to_numpy()
+    for nome in ("adaline", "pmc", "rbf"):
+        params = config_final(hip, nome)
+        m = clone(MODELOS[nome][0]).set_params(**params, clf__random_state=0).fit(X, y)
+        c, esc = m.named_steps["clf"], m.named_steps["esc"]
+        info = dict(modelo=nome, hiperparametros={k.replace("clf__", ""): v for k, v in params.items()},
+                    epocas=c.epocas_, eqm_final=c.eqm_final_, parada=c.motivo_parada_,
+                    n_parametros=c.n_parametros(), atributos=ATRIBUTOS,
+                    media_padronizacao=esc.mean_.tolist(), desvio_padronizacao=esc.scale_.tolist(),
+                    curva_eqm=c.curva_)
+        if nome == "adaline":
+            info["W"] = c.W_.tolist()
+        if nome == "pmc":
+            info.update(W1=c.W1_.tolist(), W2=c.W2_.tolist())
+        if nome == "rbf":
+            info.update(centros_padronizados=c.centros_.tolist(), sigmas=c.sigmas_.tolist(),
+                        W=c.W_.tolist(), iteracoes_kmeans=c.iter_kmeans_)
+            cent = pd.DataFrame(c.centros_ * esc.scale_ + esc.mean_, columns=ATRIBUTOS)
+            cent.insert(0, "centro", range(1, len(cent) + 1))
+            cent["sigma_padronizado"] = c.sigmas_
+            cent["peso_saida"] = c.W_[1:, 0]
+            phi = c._phi(esc.transform(m.named_steps["imp"].transform(X)))
+            dono = phi.argmax(1)
+            cent["janelas_alerta"] = [int(((dono == j) & (y == 0)).sum()) for j in range(len(cent))]
+            cent["janelas_sonolento"] = [int(((dono == j) & (y == 1)).sum()) for j in range(len(cent))]
+            cent.to_csv(saida / "rbf_centros_unidades_originais.csv", index=False, float_format="%.4f")
+            info["limiar_W0"] = float(c.W_[0, 0])
+        (saida / f"modelo_final_{nome}.json").write_text(json.dumps(info, indent=1, ensure_ascii=False))
+        print(f"  modelo final {nome}: {info['hiperparametros']} | {c.epocas_} épocas | "
+              f"EQM {c.eqm_final_:.5f} | parada: {c.motivo_parada_}")
 
 
 def main():

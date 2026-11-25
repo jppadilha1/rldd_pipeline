@@ -38,21 +38,9 @@ import importlib
 etapa3 = importlib.import_module("03_treinar_avaliar")
 
 
-def hiper_mais_frequente(hip, modelo):
-    h = hip[hip["modelo"] == modelo].drop(columns=["fold", "modelo", "cv_interna_acc_bal"])
-    h = h.dropna(axis=1, how="all").astype(str)
-    combo = h.value_counts().idxmax()
-    out = {}
-    for k, v in zip(h.columns, combo):
-        try:
-            out[f"clf__{k}"] = ast.literal_eval(v)
-        except Exception:
-            out[f"clf__{k}"] = v
-    return out
-
-
 def forward_numpy(m, nome):
-    """Devolve (função de 1 amostra em float32, n_parametros, MACs)."""
+    """Devolve (função de 1 amostra em float32, n_parametros, MACs).
+    Reproduz à mão a inferência de cada rede, como num dispositivo embarcado."""
     imp = m.named_steps["imp"].statistics_.astype(np.float32)
     mu = m.named_steps["esc"].mean_.astype(np.float32)
     sd = m.named_steps["esc"].scale_.astype(np.float32)
@@ -60,39 +48,34 @@ def forward_numpy(m, nome):
     d = len(mu)
     pre = 2 * d  # média e desvio do z-score
     if nome in ("perceptron", "adaline"):
-        w = clf.coef_.astype(np.float32).ravel()
-        b = np.float32(clf.intercept_[0])
+        W = clf.W_.astype(np.float32)[:, 0]  # W[0] é o limiar (entrada -1)
 
         def f(x):
             x = np.where(np.isnan(x), imp, x)
-            return float(((x - mu) / sd) @ w + b) > 0
-        return f, pre + w.size + 1, d
+            return float(((x - mu) / sd) @ W[1:] - W[0]) >= 0
+        return f, pre + clf.n_parametros(), d + 1
     if nome == "pmc":
-        Ws = [c.astype(np.float32) for c in clf.coefs_]
-        bs = [c.astype(np.float32) for c in clf.intercepts_]
+        W1 = clf.W1_.astype(np.float32)
+        W2 = clf.W2_.astype(np.float32)
 
         def f(x):
             x = np.where(np.isnan(x), imp, x)
-            h = np.tanh(((x - mu) / sd) @ Ws[0] + bs[0])
-            for W, b in zip(Ws[1:-1], bs[1:-1]):
-                h = np.tanh(h @ W + b)
-            return float((h @ Ws[-1] + bs[-1])[0]) > 0
-        n = sum(W.size + b.size for W, b in zip(Ws, bs))
-        macs = sum(W.size for W in Ws)
-        return f, pre + n, macs
+            y1 = 1 / (1 + np.exp(-(W1[:, 1:] @ ((x - mu) / sd) - W1[:, 0])))
+            y2 = 1 / (1 + np.exp(-(W2[:, 1:] @ y1 - W2[:, 0])))
+            return float(y2[0]) >= 0.5
+        return f, pre + clf.n_parametros(), W1.size + W2.size
     if nome == "rbf":
         C = clf.centros_.astype(np.float32)
         g = (1.0 / (2.0 * clf.sigmas_ ** 2)).astype(np.float32)
-        W = clf.W_.astype(np.float32)
+        W = clf.W_.astype(np.float32)[:, 0]
 
         def f(x):
             x = np.where(np.isnan(x), imp, x)
             z = (x - mu) / sd
             phi = np.exp(-(((z - C) ** 2).sum(1)) * g)
-            o = phi @ W[:-1] + W[-1]
-            return int(np.argmax(o))
+            return float(phi @ W[1:] - W[0]) >= 0
         k = C.shape[0]
-        return f, pre + clf.n_parametros(), k * d + k * W.shape[1]
+        return f, pre + clf.n_parametros(), k * d + k + 1
     raise ValueError(nome)
 
 
@@ -124,7 +107,7 @@ def main():
 
     linhas = []
     for nome, (est, _) in etapa3.MODELOS.items():
-        params = hiper_mais_frequente(hip, nome)
+        params = etapa3.config_final(hip, nome)
         m = etapa3.clone(est).set_params(**params, clf__random_state=0)
         t0 = time.perf_counter()
         m.fit(X, y)

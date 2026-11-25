@@ -75,3 +75,27 @@ Abra o PNG e confira duas coisas: as piscadas aparecem como vales que cruzam a l
 - Piscada: fechamento de 0,06 a 0,5 s. Acima de 0,5 s conta como fechamento longo.
 - Bocejo: MAR acima de 0,5 por pelo menos 1,5 s.
 - Baseline de limiar fixo: alarme quando o EAR fica abaixo de 0,21 por pelo menos 1 s.
+
+## Modelos e treinamento (etapa 3)
+
+As redes estão em `redes_classicas.py`, implementadas em NumPy no estilo da disciplina:
+
+| Rede | Algoritmo | Hiperparâmetros testados |
+|---|---|---|
+| Perceptron | regra de Hebb, padrão a padrão, até 1000 épocas | η ∈ {0,001; 0,01; 0,1} |
+| Adaline | regra delta em lote | η ∈ {0,001; 0,01; 0,05} |
+| PMC | backpropagation em lote, 1 camada escondida, logística em todos os neurônios | neurônios ∈ {2, 4, 8, 16, 32}, η ∈ {0,1; 0,5; 1,0} |
+| RBF | k-means (centros) + regra delta em lote (saída) | centros ∈ {2, 4, 8, 16, 32}, largura (variância do cluster ou dmax/√(2k)), η ∈ {0,01; 0,1} |
+
+Regras comuns:
+- os pesos iniciais são aleatórios em [0, 1], e o limiar é um peso ligado à entrada fixa −1;
+- a precisão é ε = 10⁻⁶: o treino para quando |EQM_atual − EQM_anterior| ≤ ε, ou ao atingir 10.000 épocas.
+
+A etapa 3 grava, além das métricas:
+- `treinamento_*.csv`: épocas, EQM final e motivo da parada de cada treinamento;
+- `resumo_treinamento_*.csv`: média por fold;
+- `curvas_eqm_*.csv`: EQM a cada época;
+- `modelo_final_*.json`: pesos da configuração final treinada com todas as janelas;
+- `rbf_centros_unidades_originais.csv`: centros da RBF em unidades reais.
+
+O script 04 deve ser rodado depois do 03, porque usa as configurações escolhidas por ele.

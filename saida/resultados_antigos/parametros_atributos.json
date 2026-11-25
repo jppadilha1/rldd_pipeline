@@ -1,0 +1,13 @@
+{
+  "janela_s": 60.0,
+  "passo_s": 30.0,
+  "min_frac_valida": 0.7,
+  "ref_percentil": 90,
+  "k_fechado": 0.7,
+  "piscada_min_s": 0.06,
+  "piscada_max_s": 0.5,
+  "mar_limiar": 0.5,
+  "bocejo_min_s": 1.5,
+  "ear_fixo": 0.21,
+  "fixo_dur_s": 1.0
+}
