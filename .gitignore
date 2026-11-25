@@ -1,0 +1,20 @@
+.venv/
+venv/
+
+# Vídeos da UTA-RLDD (pesados e com distribuição restrita aos autores da base)
+dados/
+Fold*/
+
+# Saídas intermediárias por quadro (grandes e derivadas de rostos)
+saida/series/
+saida_benchmark/
+
+# Modelo do MediaPipe (o script baixa sozinho)
+*.task
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+desktop.ini
